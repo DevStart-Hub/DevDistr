@@ -1,0 +1,847 @@
+---
+title: "Distribution Explorer"
+format:
+   dashboard:
+    theme: sketchy
+server: shiny
+---
+
+```{r}
+#| label: Libraries
+#| context: setup
+library(shiny)
+library(bslib)
+library(DT)
+library(fitdistrplus)
+library(tidyverse)
+```
+
+# Welcome to the Distribution Explorer!  {orientation="columns"}
+
+## Column  {width="65%"}
+
+### Row {height="40%"}
+<h1 style="color: #007e7e; margin-bottom: 20px;">Welcome to DevDist</h1>
+
+DevDist is an interactive tool designed to help you explore statistical distributions that may be useful for modeling your cognitive developmental data (and beyond).
+
+This application highlights some of the most valuable distributions commonly used in developmental research. Rather than serving as an exhaustive catalog or comprehensive statistical reference, DevDist aims to help you become familiar with key distributions, understand their parameters, and visualize how they behave under different conditions.
+
+Consider this your starting point for exploring distributions and their characteristics. When you're ready to dive deeper, excellent resources are available online, including: [Distribution explorer](https://distribution-explorer.github.io/index.html) and [Probability Distributions Viewer](https://statdist.ksmzn.com)
+
+
+### Row {height="60%"}
+
+
+fjkdjkfhsdjhfjksdh
+dfjsdfhsdjkfsd
+fdjfhjkshfksd
+fisdhflsdlf
+sdfsdhf
+
+## Column  {width="35%"}
+
+### Row {height="60%"}
+```{r}
+#| fig-width: 6
+#| fig-height: 4
+#| out-width: 100%
+#| out-height: 100%
+#| fig-responsive: true
+#| label: Cute plot of distributions
+# Set parameters for each distribution
+set.seed(123)
+n_samples <- 200000
+
+# Sample from all distributions
+distributions_data <- data.frame(
+  # Normal
+  Normal = rnorm(n_samples, mean = 0, sd = 1),
+  
+  # Lognormal
+  Lognormal = rlnorm(n_samples, meanlog = 0, sdlog = 0.5),
+  
+  # Exponential
+  Exponential = rexp(n_samples, rate = 1),
+  
+  # Gamma
+  Gamma = rgamma(n_samples, shape = 2, rate = 1),
+  
+  # Cauchy
+  Cauchy = rcauchy(n_samples, location = 0, scale = 1),
+  
+  # Student's t
+  Student_t = rt(n_samples, df = 5)
+
+)
+
+# Transform to long format for ggplot
+distributions_long <- distributions_data %>%
+  pivot_longer(everything(), names_to = "Distribution", values_to = "Value")
+
+# Create the density plot with just lines
+ggplot(distributions_long, aes(x = Value, color = Distribution)) +
+  geom_density(size = 1.2, alpha = 0.8) +
+  scale_color_manual(values = c("Normal" = "#1f77b4",
+                               "Lognormal" = "#ff7f0e", 
+                               "Exponential" = "#2ca02c",
+                               "Gamma" = "#d62728",
+                               "Cauchy" = "#9467bd",
+                               "Student_t" = "#8c564b")) +
+  theme_void(base_size = 14) +
+  theme(legend.position = "none") +
+  xlim(-5, 8)  # Adjust x-axis to show most distributions clearly
+
+```
+
+### Row {height="40%"}
+
+::: card
+# tester
+
+DevDist is an interactive tool designed to help you explore statistical distributions that may be useful for modeling your cognitive developmental data (and beyond).
+
+This application highlights some of the most valuable distributions commonly used in developmental research. Rather than serving as an exhaustive catalog or comprehensive statistical reference, DevDist aims to help you become familiar with key distributions, understand their parameters, and visualize how they behave under different conditions. Consider this your starting point for exploring distributions and their characteristics. When you're ready to dive deeper, excellent resources are available online, including: [Distribution explorer](https://distribution-explorer.github.io/index.html) and [Probability Distributions Viewer](https://statdist.ksmzn.com)
+:::
+
+# Distributions
+
+## Row {height="70%"}
+
+###  {.sidebar width="30%"}
+
+```{r}
+#| label: Selections
+selectInput("dist", "Distribution:",
+            choices = c("Normal", "Lognormal", "Gamma", "Exponential", 
+                       "Cauchy", "Student's t", "Beta"))
+```
+
+```{r}
+#| label: Normal
+# Normal
+conditionalPanel(
+  condition = "input.dist == 'Normal'",
+  sliderInput("n_mu", "Mean (μ)", value = 0, min = -5, max = 5, step = 0.1),
+  helpText("Moves the center left/right."),
+  sliderInput("n_sigma", "SD (σ)", value = 1, min = 0.1, max = 3, step = 0.1),
+  helpText("Controls width of the distribution.")
+)
+```
+
+```{r}
+#| label: Lognormal
+# Lognormal
+conditionalPanel(
+  condition = "input.dist == 'Lognormal'",
+  sliderInput("ln_meanlog", "Log Mean (μ)", value = 0, min = -3, max = 3, step = 0.1),
+  helpText("Mean of the underlying normal distribution."),
+  sliderInput("ln_sdlog", "Log SD (σ)", value = 1, min = 0.1, max = 2, step = 0.1),
+  helpText("SD of the underlying normal distribution.")
+)
+```
+
+```{r}
+#| label: Exponential
+# Exponential
+conditionalPanel(
+  condition = "input.dist == 'Exponential'",
+  sliderInput("exp_rate", "Rate (λ)", value = 1, min = 0.1, max = 5, step = 0.1),
+  helpText("Higher rate = shorter waiting times (mean = 1/λ).")
+)
+```
+
+```{r}
+#| label: Cauchy
+# Cauchy
+conditionalPanel(
+  condition = "input.dist == 'Cauchy'",
+  sliderInput("cauchy_location", "Location", value = 0, min = -5, max = 5, step = 0.1),
+  helpText("Shifts the center left/right."),
+  sliderInput("cauchy_scale", "Scale", value = 1, min = 0.1, max = 3, step = 0.1),
+  helpText("Controls the spread (no mean or variance exists).")
+)
+```
+
+```{r}
+#| label: Student's t
+# Student's t
+conditionalPanel(
+  condition = "input.dist == 'Student\\'s t'",
+  sliderInput("t_df", "Degrees of Freedom (ν)", value = 10, min = 1, max = 30, step = 1),
+  helpText("Higher values approximate Normal (lighter tails)."),
+  sliderInput("t_mu", "Location (μ)", value = 0, min = -5, max = 5, step = 0.1),
+  helpText("Shifts the distribution left/right."),
+  sliderInput("t_sigma", "Scale (σ)", value = 1, min = 0.1, max = 3, step = 0.1),
+  helpText("Controls spread (larger = wider).")
+)
+```
+
+```{r}
+#| label: Gamma
+# Gamma
+conditionalPanel(
+  condition = "input.dist == 'Gamma'",
+  helpText("Gamma parameterization: shape α and rate β (mean = α/β)."),
+  sliderInput("g_shape", "Shape (α > 0)", value = 2, min = 0.1, max = 10, step = 0.1),
+  helpText("Higher values → more bell-shaped."),
+  sliderInput("g_rate", "Rate (β > 0)", value = 1, min = 0.1, max = 5, step = 0.1),
+  helpText("Higher rate shifts left and narrows.")
+)
+```
+
+```{r}
+#| label: Beta
+# Beta
+conditionalPanel(
+  condition = "input.dist == 'Beta'",
+  radioButtons("beta_mode", "Parameterization:",
+               c("Mean μ & Precision φ" = "muphi",
+                 "Alpha & Beta" = "ab"),
+               inline = TRUE),
+
+  conditionalPanel(
+    condition = "input.beta_mode == 'muphi'",
+    sliderInput("b_mu", "Mean (μ in (0,1))", value = 0.3, min = 0.01, max = 0.99, step = 0.01),
+    helpText("Shifts the peak between 0 and 1."),
+    sliderInput("b_phi", "Precision (φ > 0)", value = 20, min = 1, max = 100, step = 1),
+    helpText("Higher φ = more concentrated around μ.")
+  ),
+
+  conditionalPanel(
+    condition = "input.beta_mode == 'ab'",
+    sliderInput("b_alpha", "Alpha (α > 0)", value = 3, min = 0.1, max = 20, step = 0.1),
+    helpText("Higher α shifts toward 1."),
+    sliderInput("b_beta", "Beta (β > 0)", value = 7, min = 0.1, max = 20, step = 0.1),
+    helpText("Higher β shifts toward 0.")
+  )
+)
+```
+
+### Column {width="70%"}
+
+```{r}
+#| label: Distribution Plot
+plotOutput("dist_plot", height = 360)
+```
+
+## Row {height="30%"}
+
+### Column {width="15%"}
+
+```{r}
+#| label: Summary Stats
+uiOutput("vb_moments")
+```
+
+### Column {width="15%"}
+
+```{r}
+#| label: Range & Quartiles
+uiOutput("vb_quantiles")
+```
+
+### Column {width="70%"}
+
+```{r}
+#| label: Model Info
+uiOutput("model_info")
+```
+
+# Check your data
+
+## Row {height="70%"}
+
+###  {.sidebar width="30%"}
+
+```{r}
+#| label: Data Upload Toolbar
+fileInput("csv_file", "Choose CSV File:",
+          accept = c(".csv"),
+          buttonLabel = "Browse...",
+          placeholder = "No file selected")
+
+selectInput("csv_column", "Select Column:",
+            choices = NULL,
+            selected = NULL)
+
+conditionalPanel(
+  condition = "input.csv_column != null && input.csv_column != '' && input.csv_column != 'No numeric columns found'",
+  hr(),
+  radioButtons("plot_type", "Plot Type:",
+               c("Density Plot" = "density",
+                 "Distribution Characteristics" = "descdist",
+                 "Fit Theoretical Distribution" = "fitdist"),
+               selected = "density"),
+  
+  conditionalPanel(
+    condition = "input.plot_type == 'descdist'",
+    numericInput("boot_samples", "Bootstrap Samples:",
+                 value = 100, min = 10, max = 1000, step = 10),
+    helpText("More samples = smoother plot but slower computation.")
+  ),
+  
+  conditionalPanel(
+    condition = "input.plot_type == 'fitdist'",
+    selectInput("fit_distribution", "Select Distribution:",
+                choices = c("norm" = "norm",
+                           "lnorm" = "lnorm", 
+                           "gamma" = "gamma",
+                           "exp" = "exp",
+                           "cauchy" = "cauchy",
+                           "beta" = "beta"),
+                selected = "norm"),
+    helpText("Distribution will be fitted to your data using maximum likelihood.")
+  )
+)
+
+textOutput("data_info")
+```
+
+### Column {width="70%"}
+
+```{r}
+#| label: CSV Data Plot
+conditionalPanel(
+  condition = "input.plot_type == 'density' || !input.plot_type",
+  plotOutput("csv_plot", height = 400)
+)
+
+conditionalPanel(
+  condition = "input.plot_type == 'descdist'",
+  plotOutput("descdist_plot", height = 400)
+)
+
+conditionalPanel(
+  condition = "input.plot_type == 'fitdist'",
+  plotOutput("fitdist_plot", height = 400)
+)
+```
+
+## Row {height="30%"}
+
+### Column {width="50%"}
+
+```{r}
+#| label: CSV Summary Stats
+uiOutput("csv_stats")
+```
+
+### Column {width="50%"}
+
+```{r}
+#| label: CSV Data Table
+DT::dataTableOutput("csv_table")
+```
+
+```{r}
+#| label: Server logic
+#| context: server
+
+# Custom function to replace brms::rstudent_t
+rstudent_t_custom <- function(n, df, mu = 0, sigma = 1) {
+  mu + sigma * rt(n, df)
+}
+
+# ---- Reactive sampler ----
+samples <- reactive({
+  n_req <- 3000L
+
+  if (input$dist == "Normal") {
+    rnorm(n_req, mean = input$n_mu, sd = input$n_sigma)
+
+  } else if (input$dist == "Lognormal") {
+    rlnorm(n_req, meanlog = input$ln_meanlog, sdlog = input$ln_sdlog)
+
+  } else if (input$dist == "Exponential") {
+    rexp(n_req, rate = input$exp_rate)
+
+  } else if (input$dist == "Cauchy") {
+    rcauchy(n_req, location = input$cauchy_location, scale = input$cauchy_scale)
+
+  } else if (input$dist == "Student's t") {
+    rstudent_t_custom(n_req, df = input$t_df, mu = input$t_mu, sigma = input$t_sigma)
+
+  } else if (input$dist == "Gamma") {
+    rgamma(n_req, shape = input$g_shape, rate = input$g_rate)
+
+  } else if (input$dist == "Beta") {
+    if (input$beta_mode == "ab") {
+      alpha <- input$b_alpha
+      beta  <- input$b_beta
+    } else {
+      mu  <- input$b_mu
+      phi <- input$b_phi
+      alpha <- mu * phi
+      beta  <- (1 - mu) * phi
+    }
+    rbeta(n_req, shape1 = alpha, shape2 = beta)
+
+  } else {
+    validate(need(FALSE, "Unknown distribution."))
+  }
+})
+
+# ---- Plot ----
+output$dist_plot <- renderPlot({
+  s <- samples()
+  df <- data.frame(x = s)
+  ggplot(df, aes(x)) +
+    geom_histogram(aes(y = after_stat(density)), bins = 50, alpha = 0.7, fill = "steelblue") +
+    geom_density(linewidth = 1.2, color = "darkred") +
+    geom_segment(inherit.aes = F, aes(x = 0, xend = 0, y = -Inf, yend = +Inf), color = "black") +
+    geom_segment(inherit.aes = F ,aes(x = -Inf, xend = +Inf, y = 0, yend = 0), color = "black") +
+    labs(title = paste("Sampled", input$dist, "Distribution"),
+         x = "Value", y = "Density") +
+    theme_minimal(base_size = 20)
+})
+
+# ---- Summary stats (computed once) ----
+stats <- reactive({
+  s <- samples()
+  n <- length(s)
+  q <- quantile(s, c(0.25, 0.75), names = FALSE)
+  list(
+    mean   = mean(s),
+    median = median(s),
+    sd     = sd(s),
+    se     = sd(s) / sqrt(n),
+    min    = min(s),
+    q1     = q[1],
+    q3     = q[2],
+    max    = max(s)
+  )
+})
+
+# ---- Value box 1: Mean / Median / SD / SE ----
+output$vb_moments <- renderUI({
+  st <- stats()
+  tagList(
+    tags$h4("Center & Spread", style = "margin-bottom: 10px;"),
+    tags$div(style = "font-size:0.9rem; line-height:1.2; margin-bottom: 5px;",
+             sprintf("Mean: %.3f | Median: %.3f", st$mean, st$median)),
+    tags$div(style = "font-size:0.9rem; line-height:1.2;",
+             sprintf("SD: %.3f | SE: %.3f", st$sd, st$se))
+  )
+})
+
+# ---- Value box 2: Min / Max / Q1 / Q3 ----
+output$vb_quantiles <- renderUI({
+  st <- stats()
+  tagList(
+    tags$h4("Range & Quartiles", style = "margin-bottom: 10px;"),
+    tags$div(style = "font-size:0.9rem; line-height:1.2; margin-bottom: 5px;",
+             sprintf("Min: %.3f | Max: %.3f", st$min, st$max)),
+    tags$div(style = "font-size:0.9rem; line-height:1.2;",
+             sprintf("Q1: %.3f | Q3: %.3f", st$q1, st$q3))
+  )
+})
+
+# ---- Model info cards ----
+output$model_info <- renderUI({
+  if (input$dist == "Normal") {
+    tagList(
+      h4("Model: Normal (Gaussian)"),
+      p("Symmetric, light-tailed; mean & SD."),
+      tags$ul(
+        tags$li("Params: μ, σ"),
+        tags$li("CLT often justifies Normality."),
+        tags$li("Support: (-∞, +∞)")))
+  } else if (input$dist == "Lognormal") {
+    tagList(
+      h4("Model: Lognormal"),
+      p("Right-skewed, multiplicative processes."),
+      tags$ul(
+        tags$li("Params: μ (meanlog), σ (sdlog)"),
+        tags$li("X ~ Lognormal ⟺ log(X) ~ Normal"),
+        tags$li("Support: (0, +∞)")))
+  } else if (input$dist == "Exponential") {
+    tagList(
+      h4("Model: Exponential"),
+      p("Memoryless waiting times, survival analysis."),
+      tags$ul(
+        tags$li("Params: λ (rate); mean = 1/λ"),
+        tags$li("Constant hazard rate"),
+        tags$li("Support: [0, +∞)")))
+  } else if (input$dist == "Cauchy") {
+    tagList(
+      h4("Model: Cauchy"),
+      p("Heavy-tailed, no mean or variance."),
+      tags$ul(
+        tags$li("Params: location, scale"),
+        tags$li("Median = location parameter"),
+        tags$li("Support: (-∞, +∞)")))
+  } else if (input$dist == "Student's t") {
+    tagList(
+      h4("Model: Student's t"),
+      p("Heavy-tailed, robust alternative to Normal."),
+      tags$ul(
+        tags$li("Params: ν (df), μ (location), σ (scale)"),
+        tags$li("As ν → ∞, approaches Normal."),
+        tags$li("Use when outliers are expected.")))
+  } else if (input$dist == "Gamma") {
+    tagList(
+      h4("Model: Gamma"),
+      p("Positive, right-skewed (e.g., waiting times)."),
+      tags$ul(
+        tags$li("Params: α (shape), β (rate); mean = α/β"),
+        tags$li("Support: (0, +∞)")))
+  } else if (input$dist == "Beta") {
+    tagList(
+      h4("Model: Beta"),
+      p("Proportions on (0,1)."),
+      tags$ul(
+        tags$li("Params: α, β or (μ, φ)"),
+        tags$li("Flexible shapes (U, unimodal, etc.)"),
+        tags$li("Support: (0, 1)")))
+  }
+})
+
+# ---- CSV Data Handling ----
+
+# Reactive to read CSV file
+csv_data <- reactive({
+  req(input$csv_file)
+  
+  tryCatch({
+    df <- read_csv(input$csv_file$datapath)
+    return(df)
+  }, error = function(e) {
+    return(NULL)
+  })
+})
+
+# Update column choices when new file is loaded
+observe({
+  df <- csv_data()
+  
+  if (!is.null(df)) {
+    # Get only numeric columns
+    numeric_cols <- names(df)[sapply(df, is.numeric)]
+    
+    if (length(numeric_cols) > 0) {
+      updateSelectInput(session, "csv_column",
+                        choices = numeric_cols,
+                        selected = numeric_cols[1])
+    } else {
+      updateSelectInput(session, "csv_column",
+                        choices = "No numeric columns found",
+                        selected = NULL)
+    }
+  } else {
+    updateSelectInput(session, "csv_column",
+                      choices = NULL,
+                      selected = NULL)
+  }
+})
+
+# Data info output
+output$data_info <- renderText({
+  df <- csv_data()
+  
+  if (!is.null(df)) {
+    paste0("Rows: ", nrow(df), " | Cols: ", ncol(df))
+  } else if (!is.null(input$csv_file)) {
+    "Error loading file"
+  } else {
+    "No file uploaded"
+  }
+})
+
+# ---- Best fit analysis (computed once when fitdist mode is selected) ----
+best_fit_analysis <- reactive({
+  req(input$csv_file, input$csv_column, input$plot_type == 'fitdist')
+  
+  df <- csv_data()
+  
+  if (!is.null(df) && input$csv_column %in% names(df)) {
+    column_data <- df[[input$csv_column]]
+    column_data <- column_data[!is.na(column_data)]
+    
+    if (length(column_data) > 10) {
+      distributions_to_test <- c("norm", "lnorm", "gamma", "exp")
+      
+      # Add cauchy and beta only if data meets requirements
+      if (all(is.finite(column_data))) {
+        distributions_to_test <- c(distributions_to_test, "cauchy")
+      }
+      
+      if (all(column_data > 0 & column_data < 1)) {
+        distributions_to_test <- c(distributions_to_test, "beta")
+      }
+      
+      results <- list()
+      aic_values <- c()
+      
+      for (dist in distributions_to_test) {
+        tryCatch({
+          if (dist == "gamma" && any(column_data <= 0)) {
+            next  # Skip gamma if data contains non-positive values
+          }
+          
+          if (dist == "lnorm" && any(column_data <= 0)) {
+            next  # Skip lognormal if data contains non-positive values
+          }
+          
+          if (dist == "exp" && any(column_data < 0)) {
+            next  # Skip exponential if data contains negative values
+          }
+          
+          fit <- fitdist(column_data, dist)
+          results[[dist]] <- fit
+          aic_values[dist] <- AIC(fit)
+          
+        }, error = function(e) {
+          # Skip distributions that fail to fit
+        })
+      }
+      
+      if (length(aic_values) > 0) {
+        best_dist <- names(which.min(aic_values))
+        return(list(
+          results = results,
+          aic_values = aic_values,
+          best_distribution = best_dist,
+          best_aic = min(aic_values)
+        ))
+      }
+    }
+  }
+  
+  return(NULL)
+})
+
+# CSV density plot
+output$csv_plot <- renderPlot({
+  req(input$csv_file, input$csv_column)
+  
+  df <- csv_data()
+  
+  if (!is.null(df) && input$csv_column %in% names(df)) {
+    column_data <- df[[input$csv_column]]
+    
+    # Remove NA values
+    column_data <- column_data[!is.na(column_data)]
+    
+    if (length(column_data) > 0) {
+      plot_df <- data.frame(x = column_data)
+      
+      ggplot(plot_df, aes(x)) +
+        geom_histogram(aes(y = after_stat(density)), 
+                       bins = min(50, max(10, length(column_data)/20)), 
+                       alpha = 0.7, fill = "steelblue") +
+        geom_density(linewidth = 1.2, color = "darkred") +
+        labs(title = paste("Density of", input$csv_column),
+             subtitle = paste("n =", length(column_data), "observations"),
+             x = input$csv_column, 
+             y = "Density") +
+        theme_minimal(base_size = 18)
+    } else {
+      # Empty plot with message
+      ggplot() + 
+        annotate("text", x = 0.5, y = 0.5, 
+                 label = "No valid data in selected column", 
+                 size = 6) +
+        theme_void()
+    }
+  } else {
+    # Default empty plot
+    ggplot() + 
+      annotate("text", x = 0.5, y = 0.5, 
+               label = "Upload a CSV file and select a column", 
+               size = 6) +
+      theme_void()
+  }
+})
+
+# New descdist plot
+output$descdist_plot <- renderPlot({
+  req(input$csv_file, input$csv_column, input$boot_samples)
+  
+  df <- csv_data()
+  
+  if (!is.null(df) && input$csv_column %in% names(df)) {
+    column_data <- df[[input$csv_column]]
+    
+    # Remove NA values
+    column_data <- column_data[!is.na(column_data)]
+    
+    if (length(column_data) > 5) {  # Need at least 6 observations for descdist
+      tryCatch({
+        # Create the descdist plot
+        descdist(column_data, boot = input$boot_samples)
+        title(main = paste("Distribution Characteristics:", input$csv_column),
+              sub = paste("Based on", length(column_data), "observations with", 
+                         input$boot_samples, "bootstrap samples"))
+      }, error = function(e) {
+        # Fallback plot if descdist fails
+        plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+        text(1, 1, paste("Error creating descdist plot:\n", e$message), 
+             cex = 1.2, col = "red")
+        title("Distribution Characteristics - Error")
+      })
+    } else {
+      # Not enough data
+      plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+      text(1, 1, "Need at least 6 observations\nfor distribution characteristics plot", 
+           cex = 1.5, col = "darkred")
+      title("Distribution Characteristics")
+    }
+  } else {
+    # Default empty plot
+    plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+    text(1, 1, "Upload a CSV file and select a column", cex = 1.5)
+    title("Distribution Characteristics")
+  }
+})
+
+# New fitdist plot
+output$fitdist_plot <- renderPlot({
+  req(input$csv_file, input$csv_column, input$fit_distribution)
+  
+  df <- csv_data()
+  
+  if (!is.null(df) && input$csv_column %in% names(df)) {
+    column_data <- df[[input$csv_column]]
+    column_data <- column_data[!is.na(column_data)]
+    
+    if (length(column_data) > 5) {
+      tryCatch({
+        # Check if the selected distribution is appropriate for the data
+        if (input$fit_distribution == "gamma" && any(column_data <= 0)) {
+          plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+          text(1, 1, "Gamma distribution requires positive values", 
+               cex = 1.2, col = "red")
+          title("Distribution Fit - Invalid Data")
+          return()
+        }
+        
+        if (input$fit_distribution == "lnorm" && any(column_data <= 0)) {
+          plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+          text(1, 1, "Lognormal distribution requires positive values", 
+               cex = 1.2, col = "red")
+          title("Distribution Fit - Invalid Data")
+          return()
+        }
+        
+        if (input$fit_distribution == "exp" && any(column_data < 0)) {
+          plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+          text(1, 1, "Exponential distribution requires non-negative values", 
+               cex = 1.2, col = "red")
+          title("Distribution Fit - Invalid Data")
+          return()
+        }
+        
+        if (input$fit_distribution == "beta" && (!all(column_data > 0 & column_data < 1))) {
+          plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+          text(1, 1, "Beta distribution requires values between 0 and 1", 
+               cex = 1.2, col = "red")
+          title("Distribution Fit - Invalid Data")
+          return()
+        }
+        
+        # Fit the selected distribution
+        fit <- fitdist(column_data, input$fit_distribution)
+        plot(fit)
+        title(main = paste("Fitted", toupper(input$fit_distribution), "Distribution"),
+              sub = paste("AIC:", round(AIC(fit), 2)))
+        
+      }, error = function(e) {
+        plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+        text(1, 1, paste("Error fitting distribution:\n", e$message), 
+             cex = 1.2, col = "red")
+        title("Distribution Fit - Error")
+      })
+    } else {
+      plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+      text(1, 1, "Need at least 6 observations\nfor distribution fitting", 
+           cex = 1.5, col = "darkred")
+      title("Distribution Fit")
+    }
+  } else {
+    plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+    text(1, 1, "Upload a CSV file and select a column", cex = 1.5)
+    title("Distribution Fit")
+  }
+})
+
+# CSV Summary Statistics - NO BOXES
+output$csv_stats <- renderUI({
+  req(input$csv_file, input$csv_column)
+  
+  df <- csv_data()
+  
+  if (!is.null(df) && input$csv_column %in% names(df)) {
+    column_data <- df[[input$csv_column]]
+    column_data <- column_data[!is.na(column_data)]
+    
+    if (length(column_data) > 0) {
+      
+      # Check if we're in fitdist mode and show best fit info
+      if (input$plot_type == 'fitdist') {
+        best_fit <- best_fit_analysis()
+        
+        if (!is.null(best_fit)) {
+          tagList(
+            tags$h4("Best Fitting Distribution", style = "margin-bottom: 10px;"),
+            tags$div(style = "font-size:1.15rem; font-weight:600; color: #2E8B57; margin-bottom: 5px;",
+                     paste("Best Fit:", toupper(best_fit$best_distribution))),
+            tags$div(style = "margin-bottom: 10px;",
+                     sprintf("AIC: %.2f", best_fit$best_aic)),
+            tags$div(style = "font-weight: 600; margin-bottom: 5px;", "Comparison (AIC):"),
+            tags$div(style = "font-size:0.9rem;",
+                     paste(names(best_fit$aic_values), 
+                           sprintf("%.1f", best_fit$aic_values), 
+                           sep = ": ", collapse = " | "))
+          )
+        } else {
+          tagList(
+            tags$h4("Best Fitting Distribution"),
+            tags$p("Unable to fit distributions to this data")
+          )
+        }
+      } else {
+        # Regular summary statistics - NO CARD/BOX
+        tagList(
+          tags$h4(paste("Summary:", input$csv_column), style = "margin-bottom: 10px;"),
+          tags$div(style = "font-size:1.15rem; font-weight:600; margin-bottom: 5px;",
+                   sprintf("Mean: %.4f", mean(column_data))),
+          tags$div(style = "margin-bottom: 5px;",
+                   sprintf("Median: %.4f", median(column_data))),
+          tags$div(style = "margin-bottom: 5px;",
+                   sprintf("SD: %.4f", sd(column_data))),
+          tags$div(style = "font-size:0.9rem;",
+                   sprintf("Min: %.4f | Max: %.4f", min(column_data), max(column_data)))
+        )
+      }
+    } else {
+      tagList(
+        tags$h4("Summary"),
+        tags$p("No valid numeric data")
+      )
+    }
+  } else {
+    tagList(
+      tags$h4("Summary"),
+      tags$p("Select a column to view statistics")
+    )
+  }
+})
+
+# CSV Data Table
+output$csv_table <- DT::renderDataTable({
+  df <- csv_data()
+  
+  if (!is.null(df)) {
+    DT::datatable(df, 
+                  options = list(
+                    pageLength = 10,
+                    scrollX = TRUE,
+                    dom = 'tip'
+                  ),
+                  class = 'cell-border stripe')
+  } else {
+    NULL
+  }
+})
+```
