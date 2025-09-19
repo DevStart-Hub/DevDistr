@@ -1,0 +1,708 @@
+---
+title: "DevDist page2"
+format:
+   dashboard:
+    theme: sandstone
+    fontsize: .9em   # works like CSS
+server: shiny
+---
+
+```{=html}
+<!-- Prism.js CSS (Dark theme similar to Zenburn) -->
+<link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+
+<!-- Prism.js Core -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+
+<!-- R Language Support -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-r.min.js"></script>
+
+<!-- Auto-highlight new content -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Re-highlight when Shiny updates content
+  if (window.Shiny) {
+    $(document).on('shiny:value shiny:outputinvalidated', function() {
+      setTimeout(function() {
+        Prism.highlightAll();
+      }, 50);
+    });
+  }
+  
+  // Initial highlight
+  Prism.highlightAll();
+});
+</script>
+```
+
+```{r}
+#| label: Libraries
+#| context: setup
+library(shiny)
+library(bslib)
+library(fitdistrplus)
+library(tinyplot)
+```
+
+# Distributions
+
+## Row
+
+###  {.sidebar width="20%"}
+
+```{r}
+#| label: Distribution Selection
+selectizeInput("dist_selection", "Select Distribution:",
+              choices = list(
+                "Continuous" = c("Normal", "Lognormal", "Student's t", "Beta"),
+                "Categorical" = c("Bernoulli", "Categorical")
+              ),
+              selected = "Normal")
+```
+
+```{r}
+#| label: Distributions Parameters
+# Normal
+conditionalPanel(
+  condition = "input.dist_selection == 'Normal'",
+  sliderInput("n_mu", "Mean (μ)", value = 0, min = -5, max = 5, step = 0.1),
+  helpText(HTML("Moves the center left/right.<br>"),style = "font-size: 0.6rem;"),
+  sliderInput("n_sigma", "SD (σ)", value = 1, min = 0.1, max = 3, step = 0.1),
+  helpText(HTML("Controls width of the distribution.<br>"),style = "font-size: 0.6rem;")
+)
+
+# Lognormal
+conditionalPanel(
+  condition = "input.dist_selection == 'Lognormal'",
+  sliderInput("ln_meanlog", "Log Mean (μ)", value = 0, min = -3, max = 3, step = 0.1),
+  helpText(HTML("Mean of the underlying normal distribution.<br>"),style = "font-size: 0.6rem;"),
+  sliderInput("ln_sdlog", "Log SD (σ)", value = 0.6, min = 0.1, max = 2, step = 0.1),
+  helpText(HTML("SD of the underlying normal distribution.<br>"),style = "font-size: 0.6rem;")
+)
+
+# Student's t
+conditionalPanel(
+  condition = "input.dist_selection == 'Student\\'s t'",
+  sliderInput("t_df", "Degrees of Freedom (ν)", value = 4, min = 1, max = 20, step = 1),
+  helpText(HTML("Higher values approximate Normal (lighter tails).<br>"),style = "font-size: 0.6rem;"),
+  sliderInput("t_mu", "Location (μ)", value = 0, min = -5, max = 5, step = 0.1),
+  helpText(HTML("Shifts the distribution left/right.<br>"),style = "font-size: 0.6rem;"),
+  sliderInput("t_sigma", "Scale (σ)", value = 1, min = 0.1, max = 3, step = 0.1),
+  helpText(HTML("Controls spread (larger = wider).<br>"),style = "font-size: 0.6rem;")
+)
+
+# Beta
+conditionalPanel(
+  condition = "input.dist_selection == 'Beta'",
+  radioButtons("beta_mode", "Parameterization:",
+               c("Mean μ & Precision φ" = "muphi",
+                 "Alpha & Beta" = "ab"),
+               inline = TRUE),
+
+  conditionalPanel(
+    condition = "input.beta_mode == 'muphi'",
+    sliderInput("b_mu", "Mean (μ in (0,1))", value = 0.3, min = 0.01, max = 0.99, step = 0.01),
+    helpText(HTML("Shifts the peak between 0 and 1.<br>"),style = "font-size: 0.6rem;"),
+    sliderInput("b_phi", "Precision (φ > 0)", value = 20, min = 1, max = 100, step = 1),
+    helpText(HTML("Higher φ = more concentrated around μ.<br>"),style = "font-size: 0.6rem;")
+  ),
+
+  conditionalPanel(
+    condition = "input.beta_mode == 'ab'",
+    sliderInput("b_alpha", "Alpha (α > 0)", value = 3, min = 0.1, max = 20, step = 0.1),
+    helpText(HTML("Higher α shifts toward 1.<br>"),style = "font-size: 0.6rem;"),
+    sliderInput("b_beta", "Beta (β > 0)", value = 7, min = 0.1, max = 20, step = 0.1),
+    helpText(HTML("Higher β shifts toward 0.<br>"),style = "font-size: 0.6rem;")
+  )
+)
+
+# Bernoulli
+conditionalPanel(
+  condition = "input.dist_selection == 'Bernoulli'",
+  sliderInput("bern_p", "Probability of Success (p)", value = 0.5, min = 0.01, max = 0.99, step = 0.01),
+  helpText(HTML("Probability of getting 'Success' (or 'True').<br>"), style = "font-size: 0.6rem;"),
+  radioButtons("bern_labels", "Outcome Labels:",
+               c("Success/Failure" = "success",
+                 "True/False" = "logical",
+                 "Yes/No" = "yesno",
+                 "1/0" = "binary"),
+               selected = "success",
+               inline = TRUE)
+)
+
+# Categorical with constrained probabilities
+conditionalPanel(
+  condition = "input.dist_selection == 'Categorical'",
+  sliderInput("cat_k", "Number of categories (k)", value = 3, min = 2, max = 5, step = 1),
+  helpText(HTML("Number of possible outcomes.<br>"), style = "font-size: 0.6rem;"),
+  
+  # Display remaining probability
+  uiOutput("remaining_prob_display"),
+  
+  conditionalPanel(
+    condition = "input.cat_k >= 2",
+    uiOutput("cat_p1_slider")
+  ),
+  conditionalPanel(
+    condition = "input.cat_k >= 3",
+    uiOutput("cat_p2_slider")
+  ),
+  conditionalPanel(
+    condition = "input.cat_k >= 4",
+    uiOutput("cat_p3_slider")
+  ),
+  conditionalPanel(
+    condition = "input.cat_k >= 5",
+    uiOutput("cat_p4_slider")
+  ),  
+  helpText(HTML("Remaining probability is automatically assigned to the last category.<br>"), style = "font-size: 0.6rem;")
+)
+```
+
+### Column {width="60%"}
+
+####  {.tabset}
+
+##### Plot
+
+```{r}
+#| label: Distribution Plot
+plotOutput("dist_plot", height = 360)
+```
+
+##### Distribution Info
+
+```{r}
+#| label: Distribution Info
+tagList(
+  conditionalPanel(
+    condition = "input.dist_selection == 'Normal'",
+    HTML('<h2>Normal (Gaussian) Distribution</h2>'),
+    HTML('<p>The normal distribution is the classic bell-shaped curve with perfect symmetry around its center. It has a single peak where most values cluster, with frequencies tapering off equally in both directions. The width of the curve reflects variability - wider curves indicate more spread in the data, while narrower curves show values tightly clustered around the mean.</p>'),
+    HTML('<h3>What can it model?</h3>'),
+    HTML('<p>This distribution models continuous data that clusters symmetrically around a central value, where extreme deviations in either direction are equally likely but become increasingly rare. It works best for measurements that result from multiple additive factors, aggregated scores, or standardized assessments where the underlying process produces balanced variation around a typical value.</p>')
+  ),
+  
+  conditionalPanel(
+    condition = "input.dist_selection == 'Lognormal'",
+    HTML('<h2>Lognormal Distribution</h2>'),
+    HTML('<p>The lognormal distribution is characterized by its distinctive right skew, creating a sharp rise followed by a long tail extending toward higher values. All values are strictly positive - the distribution never reaches zero. Most observations concentrate at the lower end, while occasional values stretch far into the upper range.</p>'),
+    HTML('<h3>What can it model?</h3>'),
+    HTML('<p>This distribution models positive-valued data with a natural lower bound but no upper limit, where fast or efficient responses are common but slower, more variable responses occasionally occur. It captures processes with inherent timing constraints where quick responses cluster together but processing difficulties, attention lapses, or individual differences can produce much longer latencies.</p>')
+  ),
+  
+  conditionalPanel(
+    condition = "input.dist_selection == 'Student\\'s t'",
+    HTML('<h2>T-distribution</h2>'),
+    HTML('<p>The t-distribution resembles the normal distribution but with notably heavier tails, making extreme values more probable than in a normal curve. As degrees of freedom increase, it approaches the normal distribution, but with fewer degrees of freedom, it becomes more accommodating of outlying observations.</p>'),
+    HTML('<h3>What can it model?</h3>'),
+    HTML('<p>This distribution models data that may contain legitimate extreme values, particularly when sample sizes are small or when individual differences are substantial. It provides robust modeling for situations where occasional extreme observations represent meaningful variation rather than measurement error, offering protection against the influence of valid but unusual data points.</p>')
+  ),
+
+  conditionalPanel(
+    condition = "input.dist_selection == 'Beta'",
+    HTML('<h2>Beta Distribution</h2>'),
+    HTML('<p>The beta distribution is remarkably flexible in shape while being strictly bounded between 0 and 1. Depending on its parameters, it can appear uniform, U-shaped, bell-shaped, or heavily skewed toward either boundary. This bounded nature prevents impossible values while accommodating diverse patterns within the valid range.</p>'),
+    HTML('<h3>What can it model?</h3>'),
+    HTML('<p>This distribution models proportions, rates, and probabilities - any measurement that represents a fraction of a whole or success rate out of total attempts. It naturally handles data bounded between 0 and 1, making it ideal for performance measures, accuracy rates, or any variable expressing "how much out of the total possible."</p>')
+  ),
+  
+  conditionalPanel(
+    condition = "input.dist_selection == 'Bernoulli'",
+    HTML('<h2>Bernoulli Distribution</h2>'),
+    HTML('<p>The Bernoulli distribution is the simplest probability distribution, representing a single trial with exactly two possible outcomes. One outcome is designated as "success" (coded as 1) and the other as "failure" (coded as 0), with a fixed probability determining the likelihood of success.</p>'),
+    HTML('<h3>What can it model?</h3>'),
+    HTML('<p>This distribution models binary outcomes where each observation can only take one of two mutually exclusive states. It captures yes/no decisions, correct/incorrect responses, presence/absence judgments, or any situation where each trial results in exactly two possible categorical outcomes with no middle ground or partial responses.</p>')
+  ),
+    
+  conditionalPanel(
+    condition = "input.dist_selection == 'Categorical'",
+    HTML('<h2>Categorical Distribution</h2>'),
+    HTML('<p>The categorical distribution extends binary outcomes to multiple discrete categories. Each possible outcome has its own probability, and all probabilities sum to 1. Categories are mutually exclusive - each observation falls into exactly one category - and collectively exhaustive of all possibilities.</p>'),
+    HTML('<h3>What can it model?</h3>'),
+    HTML('<p>This distribution models discrete choice data where observations fall into one of several distinct, non-overlapping categories. It handles multinomial outcomes, classification data, or any measurement where participants or observations are assigned to one category from a finite set of mutually exclusive options.</p>')
+  )
+)
+```
+
+##### How to model
+
+```{r}
+#| label: How to model
+tagList(
+  conditionalPanel(
+    condition = "input.dist_selection == 'Normal'",
+    p("For normal distributions, both frequentist and Bayesian frameworks assume the same underlying model structure. The normal distribution is the default assumption in most linear models, so you typically don't need to specify a family parameter."),
+    h3("Frequentist (lme4)"),
+    p("Use ", code("lmer()"), " for linear mixed-effects models:"),
+    pre(code("model <- lmer(outcome ~ fixed_effect + (1|random_effect), data = your_data)", class = "language-r")),
+    p("Formula breakdown: ", code("outcome"), " is your dependent variable, ", code("fixed_effect"), " represents predictors with effects you want to estimate across the population, ", code("(1|random_effect)"), " adds random intercepts allowing baseline differences between groups (e.g., participants, schools)."),
+    h3("Bayesian (brms)"),
+    p("Use ", code("brm()"), " with the same formula syntax:"),
+    pre(code("model <- brm(outcome ~ fixed_effect + (1|random_effect), data = your_data)", class = "language-r")),
+    p("The formula structure is identical, but brms uses Bayesian estimation with prior distributions rather than maximum likelihood.")
+  ),
+
+  conditionalPanel(
+    condition = "input.dist_selection == 'Lognormal'",
+    p("Lognormal distributions are not supported in lme4. For right-skewed positive data, consider using brms for proper lognormal modeling."),
+    h3("Frequentist (lme4)"),
+    p("lme4 does not support lognormal distributions. You could use ", code("glmer()"), " with a Gamma family, though this is usually not ideal for truly lognormal data:"),
+    pre(code("model <- glmer(outcome ~ fixed_effect + (1|random_effect), family = Gamma(link = 'log'), data = your_data)", class = "language-r")),
+    h3("Bayesian (brms)"),
+    p("brms supports lognormal distributions directly with the ", code("lognormal()"), " family:"),
+    pre(code("model <- brm(outcome ~ fixed_effect + (1|random_effect), family = lognormal(), data = your_data)", class = "language-r")),
+    p("This properly models the lognormal distribution and keeps coefficients interpretable on the original scale.")
+  ),
+
+  conditionalPanel(
+    condition = "input.dist_selection == 'Student\\'s t'",
+    p("Student's t distributions provide robust modeling for data with heavier tails than normal. Availability differs significantly between frameworks."),
+    h3("Frequentist (lme4)"),
+    p("lme4 does not support t-distributed response variables. It uses t-distributions only for inference (confidence intervals, p-values) assuming normally distributed residuals."),
+    h3("Bayesian (brms)"),
+    p("brms supports t-distributions using the ", code("student()"), " family:"),
+    pre(code("model <- brm(outcome ~ fixed_effect + (1|random_effect), family = student(), data = your_data)", class = "language-r")),
+    p("The model estimates degrees of freedom automatically, providing robust estimates when extreme values are present. Lower degrees of freedom indicate heavier tails.")
+  ),
+
+  conditionalPanel(
+    condition = "input.dist_selection == 'Beta'",
+    p("Beta distributions model bounded data between 0 and 1. Support differs between frameworks."),
+    h3("Frequentist (lme4)"),
+    p("lme4 does not support beta distributions. Use brms for proper beta modeling."),
+    h3("Bayesian (brms)"),
+    p("brms supports beta distributions:"),
+    pre(code("model <- brm(proportion ~ fixed_effect + (1|random_effect), family = Beta(), data = your_data)", class = "language-r")),
+    p("Your ", code("proportion"), " variable must be between 0 and 1 (exclusive). Convert percentages by dividing by 100.")
+  ),
+
+  conditionalPanel(
+    condition = "input.dist_selection == 'Bernoulli'",
+    p("Bernoulli distributions model binary outcomes. Both frameworks use similar approaches but with different family specifications."),
+    h3("Frequentist (lme4)"),
+    p("Use ", code("glmer()"), " with binomial family for binary data:"),
+    pre(code("model <- glmer(binary_outcome ~ fixed_effect + (1|random_effect), family = binomial(), data = your_data)", class = "language-r")),
+    p("The ", code("binary_outcome"), " should be coded as 0/1, TRUE/FALSE, or a factor. The model uses logistic regression with logit link function."),
+    h3("Bayesian (brms)"),
+    p("Use ", code("bernoulli()"), " family (equivalent to binomial for single trials):"),
+    pre(code("model <- brm(binary_outcome ~ fixed_effect + (1|random_effect), family = bernoulli(), data = your_data)", class = "language-r")),
+    p("The formula structure and data coding requirements are identical to the frequentist approach.")
+  ),
+
+  conditionalPanel(
+    condition = "input.dist_selection == 'Categorical'",
+    p("Categorical distributions model multinomial outcomes. Support varies dramatically between frameworks."),
+    h3("Frequentist (lme4)"),
+    p("lme4 cannot handle categorical responses with mixed effects. Consider alternative packages like ", code("MCMCglmm"), " or restructure as multiple binary comparisons using ", code("glmer()"), "."),
+    h3("Bayesian (brms)"),
+    p("brms supports categorical responses with the ", code("categorical()"), " family:"),
+    pre(code("model <- brm(category ~ fixed_effect + (1|random_effect), family = categorical(), data = your_data)", class = "language-r")),
+    p("The ", code("category"), " variable should be a factor (e.g., 'A', 'B', 'C'). brms estimates separate equations for each category relative to a reference level.")
+  )
+)
+```
+
+### Column {width="20%"}
+
+```{r}
+#| label: Summary Stats2
+uiOutput("vb_moments")
+```
+
+```{r}
+#| label: Server logic
+#| context: server
+
+# Custom function to replace brms::rstudent_t
+rstudent_t_custom <- function(n, df, mu = 0, sigma = 1) {
+  mu + sigma * rt(n, df)
+}
+
+# Function to generate categorical samples
+rcategorical <- function(n, probs) {
+  sample(1:length(probs), n, replace = TRUE, prob = probs)
+}
+
+# Helper function to determine category from distribution name
+get_dist_category <- function(dist_name) {
+  continuous_dists <- c("Normal", "Lognormal", "Student's t", "Beta")
+  if (dist_name %in% continuous_dists) {
+    "Continuous"
+  } else {
+    "Categorical"
+  }
+}
+
+# ---- Reactive sampler ----
+samples <- reactive({
+  n_req <- 3000L
+  selected_dist <- input$dist_selection
+  
+  if (get_dist_category(selected_dist) == "Continuous") {
+    if (selected_dist == "Normal") {
+      rnorm(n_req, mean = input$n_mu, sd = input$n_sigma)
+    } else if (selected_dist == "Lognormal") {
+      rlnorm(n_req, meanlog = input$ln_meanlog, sdlog = input$ln_sdlog)
+    } else if (selected_dist == "Student's t") {
+      rstudent_t_custom(n_req, df = input$t_df, mu = input$t_mu, sigma = input$t_sigma)
+    } else if (selected_dist == "Beta") {
+      if (input$beta_mode == "ab") {
+        alpha <- input$b_alpha
+        beta  <- input$b_beta
+      } else {
+        mu  <- input$b_mu
+        phi <- input$b_phi
+        alpha <- mu * phi
+        beta  <- (1 - mu) * phi
+      }
+      rbeta(n_req, shape1 = alpha, shape2 = beta)
+    } else {
+      validate(need(FALSE, "Unknown continuous distribution."))
+    }
+  } else if (get_dist_category(selected_dist) == "Categorical") {
+    if (selected_dist == "Bernoulli") {
+      # Generate Bernoulli samples (0s and 1s)
+      rbinom(n_req, size = 1, prob = input$bern_p)
+    } else if (selected_dist == "Categorical") {
+      # Get probabilities for categorical distribution
+      k <- input$cat_k
+      probs <- numeric(k)
+      
+      if (k >= 2) probs[1] <- input$cat_p1
+      if (k >= 3) probs[2] <- input$cat_p2
+      if (k >= 4) probs[3] <- input$cat_p3
+      if (k >= 5) probs[4] <- input$cat_p4
+      if (k >= 6) probs[5] <- input$cat_p5
+      if (k >= 7) probs[6] <- input$cat_p6
+      if (k >= 8) probs[7] <- input$cat_p7
+      if (k >= 9) probs[8] <- input$cat_p8
+      if (k >= 10) probs[9] <- input$cat_p9
+      
+      # Assign remaining probability to last category
+      probs[k] <- 1 - sum(probs[1:(k-1)])
+      
+      # Ensure all probabilities are positive
+      if (any(probs <= 0)) {
+        probs <- rep(1/k, k)  # Equal probabilities if invalid
+      }
+      
+      rcategorical(n_req, probs)
+    } else {
+      validate(need(FALSE, "Unknown categorical distribution."))
+    }
+  } else {
+    validate(need(FALSE, "Unknown distribution."))
+  }
+})
+
+output$dist_plot <- renderPlot({
+  s <- samples()
+  selected_dist <- input$dist_selection
+ 
+  if (get_dist_category(selected_dist) == "Continuous") {
+    # Use tinyplot for continuous distributions
+    tinyplot(s, type = "density", lwd = 3,
+            bw='SJ',
+            adjust=.5,
+            kernel = "gaussian",
+            n = 512,
+            main = paste("Sampled", selected_dist, "Distribution"),
+            xlab = "Value",
+            ylab = "Density",
+            col = "#007e7e",
+            fill= "#007e7e")
+   
+    # Add histogram overlay
+    tinyplot_add(
+      s,
+      type = "hist",
+      freq = FALSE,
+      col = 'black',
+      fill= 'transparent',
+      lwd=1
+    )
+   
+    # Add reference lines
+    abline(v = 0, col = "black", lty = 1, lwd = 1.2)
+    abline(h = 0, col = "black", lty = 1, lwd = 1.2)
+   
+  } else if (get_dist_category(selected_dist) == "Categorical") {
+    if (selected_dist == "Bernoulli") {
+      # Bernoulli: create lollipop plot
+      counts <- table(s)
+     
+      # Create labels based on user choice
+      if (input$bern_labels == "success") {
+        labels <- c("Failure", "Success")
+      } else if (input$bern_labels == "logical") {
+        labels <- c("False", "True")
+      } else if (input$bern_labels == "yesno") {
+        labels <- c("No", "Yes")
+      } else {
+        labels <- c("0", "1")
+      }
+     
+      # Get probabilities and positions
+      y_vals <- as.numeric(counts) / length(s)
+      x_pos <- 1:length(y_vals)
+      plot_labels <- labels[as.numeric(names(counts)) + 1]
+     
+      # Create empty plot
+      plot(x_pos, y_vals,
+           type = "n",
+           main = paste("Bernoulli Distribution (p =", input$bern_p, ")"),
+           xlab = "Outcome",
+           ylab = "Probability",
+           xaxt = "n",
+           ylim = c(0, 1),
+           xlim = c(0.5, length(y_vals) + 0.5))
+     
+      # Add vertical lines (stems)
+      segments(x0 = x_pos, y0 = 0, x1 = x_pos, y1 = y_vals,
+               col = "#007e7e", lwd = 4)
+     
+      # Add dots at the top
+      points(x_pos, y_vals,
+             pch = 19, cex = 2.5,
+             col = "#007e7e")
+      abline(h = 0, col = "black", lty = 1, lwd = 6 )
+
+      # Add custom x-axis labels
+      axis(1, at = x_pos, labels = plot_labels)
+     
+      # Add probability values as text above dots
+      text(x_pos, y_vals + 0.05,
+           labels = sprintf("%.3f", y_vals),
+           cex = 0.9, pos = 3)
+             
+    } else if (selected_dist == "Categorical") {
+      # Categorical: create lollipop plot
+      counts <- table(s)
+      x_vals <- paste("Cat", names(counts))
+      y_vals <- as.numeric(counts) / length(s)
+     
+      # Create positions for x-axis
+      x_pos <- 1:length(y_vals)
+     
+      # Create empty plot with appropriate limits
+      plot(x_pos, y_vals,
+           type = "n",
+           main = paste("Sampled Categorical Distribution (k=", input$cat_k, ")"),
+           xlab = "Category",
+           ylab = "Probability",
+           xaxt = "n",
+           ylim = c(0, max(y_vals) * 1.15),
+           xlim = c(0.5, length(y_vals) + 0.5))
+     
+      # Add vertical lines (stems)
+      segments(x0 = x_pos, y0 = 0, x1 = x_pos, y1 = y_vals,
+               col = "#007e7e", lwd = 4)
+     
+      # Add dots at the top
+      points(x_pos, y_vals,
+             pch = 19, cex = 2.5,
+             col = "#007e7e")
+      abline(h = 0, col = "black", lty = 1, lwd = 6)
+
+      # Add custom x-axis labels
+      axis(1, at = x_pos, labels = x_vals)
+     
+      # Add probability values as text above dots
+      text(x_pos, y_vals + max(y_vals) * 0.05,
+           labels = sprintf("%.3f", y_vals),
+           cex = 0.8, pos = 3)
+    }
+  }
+}, height = function() {
+  session$clientData$output_dist_plot_height
+}, width = function() {
+  session$clientData$output_dist_plot_width
+}, res = 96)
+
+
+# ---- Summary stats ----
+stats <- reactive({
+  s <- samples()
+  selected_dist <- input$dist_selection
+  n <- length(s)
+  
+  if (get_dist_category(selected_dist) == "Continuous") {
+    q <- quantile(s, c(0.25, 0.75), names = FALSE)
+    list(
+      mean   = mean(s),
+      median = median(s),
+      sd     = sd(s),
+      se     = sd(s) / sqrt(n),
+      min    = min(s),
+      q1     = q[1],
+      q3     = q[2],
+      max    = max(s),
+      type   = "continuous"
+    )
+  } else {
+    # For categorical, provide different stats
+    list(
+      mean   = mean(s),
+      median = median(s),
+      mode   = as.numeric(names(sort(table(s), decreasing = TRUE))[1]),
+      var    = var(s),
+      min    = min(s),
+      max    = max(s),
+      type   = "categorical"
+    )
+  }
+})
+
+output$vb_moments <- renderUI({
+  st <- stats()
+  selected_dist <- input$dist_selection
+  
+  # Define badges for each distribution
+  get_distribution_badges <- function(dist_name) {
+    switch(dist_name,
+      "Normal" = list(
+        "Looking time", "IQ Scores", "Memory Span", "Standardized Test Scores"
+      ),
+      "Lognormal" = list(
+        "Reaction Times", "Saccadic Latencies", "Decision Times", "Time-to-Complete Tasks"
+      ),
+      "Student's t" = list(
+        "Small Sample Studies", "Individual Differences", "Clinical Assessments", "Personality Scores"
+      ),
+      "Beta" = list(
+        "Accuracy Rates", "Proportion Correct", "Confidence Ratings (0-1)", "Probability Judgments", "Response Proportions"
+      ),
+      "Bernoulli" = list(
+        "Correct/Incorrect Response", "Detect/Miss (Signal Detection)", "Recall/Forget", "Choose Option A/B", "Attend/Ignore", "Present/Absent Judgment"
+      ),
+      "Categorical" = list(
+        "Likert Scale Responses", "Multiple Choice Answers", "Emotional State Categories", "Diagnostic Categories", "Personality Types"
+      ),
+      list()
+    )
+  }
+  
+  # Create badges HTML
+  create_badges <- function(badge_list) {
+    if (length(badge_list) == 0) return("")
+    
+    badges_html <- paste(
+      sapply(badge_list, function(badge) {
+        paste0('<span class="badge bg-primary me-2 mb-1">', badge, '</span>')
+      }), 
+      collapse = '<br>'
+    )
+    return(badges_html)
+  }
+  
+  badges <- get_distribution_badges(selected_dist)
+  badges_html <- create_badges(badges)
+ 
+  if (st$type == "continuous") {
+    tagList(
+      tags$div(style = "background-color: #f8f9fa; border-radius: 8px; padding: 15px; margin-bottom: 20px;",
+        tags$h4("Center & Spread", style = "margin-bottom: 12px; color: #495057; font-weight: 600;"),
+        tags$div(style = "font-size: 0.9rem; line-height: 1.4; margin-bottom: 8px; color: #6c757d;",
+                 sprintf("Mean: %.3f | Median: %.3f", st$mean, st$median)),
+        tags$div(style = "font-size: 0.9rem; line-height: 1.4; color: #6c757d;",
+                 sprintf("SD: %.3f | SE: %.3f", st$sd, st$se))
+      ),
+      tags$div(style = "background-color: #f8f9fa; border-radius: 8px; padding: 15px; margin-bottom: 20px;",
+        tags$h4("Range & Quartiles", style = "margin-bottom: 12px; color: #495057; font-weight: 600;"),
+        tags$div(style = "font-size: 0.9rem; line-height: 1.4; margin-bottom: 8px; color: #6c757d;",
+                 sprintf("Min: %.3f | Max: %.3f", st$min, st$max)),
+        tags$div(style = "font-size: 0.9rem; line-height: 1.4; color: #6c757d;",
+                 sprintf("Q1: %.3f | Q3: %.3f", st$q1, st$q3))
+      ),
+      tags$div(style = "background-color: #f8f9fa; border-radius: 8px; padding: 15px; margin-bottom: 20px;",
+        tags$h4("Example Data Types", style = "margin-bottom: 12px; color: #495057; font-weight: 600;"),
+        HTML(badges_html)
+      )
+    )
+  } else {
+    tagList(
+      tags$div(style = "background-color: #f8f9fa; border-radius: 8px; padding: 15px; margin-bottom: 20px;",
+        tags$h4("Center & Spread", style = "margin-bottom: 12px; color: #495057; font-weight: 600;"),
+        tags$div(style = "font-size: 0.9rem; line-height: 1.4; margin-bottom: 8px; color: #6c757d;",
+                 sprintf("Mean: %.3f | Mode: %.0f", st$mean, st$mode)),
+        tags$div(style = "font-size: 0.9rem; line-height: 1.4; color: #6c757d;",
+                 sprintf("Variance: %.3f", st$var))
+      ),
+      tags$div(style = "background-color: #f8f9fa; border-radius: 8px; padding: 15px; margin-bottom: 20px;",
+        tags$h4("Range", style = "margin-bottom: 12px; color: #495057; font-weight: 600;"),
+        tags$div(style = "font-size: 0.9rem; line-height: 1.4; color: #6c757d;",
+                 sprintf("Min: %.0f | Max: %.0f", st$min, st$max))
+      ),
+      tags$div(style = "background-color: #f8f9fa; border-radius: 8px; padding: 15px; margin-bottom: 20px;",
+        tags$h4("Example Data Types", style = "margin-bottom: 12px; color: #495057; font-weight: 600;"),
+        HTML(badges_html)
+      )
+    )
+  }
+})
+
+
+# Calculate remaining probability
+remaining_prob <- reactive({
+  k <- input$cat_k
+  if (is.null(k)) return(1)
+  
+  used_prob <- 0
+  if (k >= 2 && !is.null(input$cat_p1)) used_prob <- used_prob + input$cat_p1
+  if (k >= 3 && !is.null(input$cat_p2)) used_prob <- used_prob + input$cat_p2
+  if (k >= 4 && !is.null(input$cat_p3)) used_prob <- used_prob + input$cat_p3
+  if (k >= 5 && !is.null(input$cat_p4)) used_prob <- used_prob + input$cat_p4
+  max(0, 1 - used_prob)
+})
+
+# Display remaining probability
+output$remaining_prob_display <- renderUI({
+  remaining <- remaining_prob()
+  color <- if (remaining < 0.01) "red" else "blue"
+  tags$div(
+    style = paste0("font-weight: bold; color: ", color, "; margin: 10px 0;"),
+    sprintf("Remaining probability for last category: %.3f", remaining)
+  )
+})
+
+# Dynamic sliders with constraints
+output$cat_p1_slider <- renderUI({
+  max_val <- min(0.98, remaining_prob() + (input$cat_p1 %||% 0.25))
+  sliderInput("cat_p1", "P(Category 1)", 
+              value = min(input$cat_p1 %||% 0.25, max_val), 
+              min = 0.01, max = max_val, step = 0.01)
+})
+
+output$cat_p2_slider <- renderUI({
+  if (input$cat_k < 3) return(NULL)
+  max_val <- min(0.98, remaining_prob() + (input$cat_p2 %||% 0.25))
+  sliderInput("cat_p2", "P(Category 2)", 
+              value = min(input$cat_p2 %||% 0.25, max_val), 
+              min = 0.01, max = max_val, step = 0.01)
+})
+
+output$cat_p3_slider <- renderUI({
+  if (input$cat_k < 4) return(NULL)
+  max_val <- min(0.98, remaining_prob() + (input$cat_p3 %||% 0.25))
+  sliderInput("cat_p3", "P(Category 3)", 
+              value = min(input$cat_p3 %||% 0.25, max_val), 
+              min = 0.01, max = max_val, step = 0.01)
+})
+
+output$cat_p4_slider <- renderUI({
+  if (input$cat_k < 5) return(NULL)
+  max_val <- min(0.98, remaining_prob() + (input$cat_p4 %||% 0.1))
+  sliderInput("cat_p4", "P(Category 4)", 
+              value = min(input$cat_p4 %||% 0.1, max_val), 
+              min = 0.01, max = max_val, step = 0.01)
+})
+
+output$cat_p5_slider <- renderUI({
+  if (input$cat_k < 6) return(NULL)
+  max_val <- min(0.98, remaining_prob() + (input$cat_p5 %||% 0.1))
+  sliderInput("cat_p5", "P(Category 5)", 
+              value = min(input$cat_p5 %||% 0.1, max_val), 
+              min = 0.01, max = max_val, step = 0.01)
+})
+```

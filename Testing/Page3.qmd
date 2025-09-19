@@ -1,0 +1,430 @@
+---
+title: "DevDist page3"
+format:
+   dashboard:
+    theme: sandstone
+    fontsize: .9em   # works like CSS
+server: shiny
+---
+
+```{r}
+#| label: Libraries
+#| context: setup
+library(shiny)
+library(bslib)
+library(DT)
+library(fitdistrplus)
+library(tidyverse)
+library(tinyplot)
+```
+
+# Check your data
+
+## Column {width="30%"}
+
+### Row {.sidebar height="70%"}
+
+```{r}
+#| label: Data Upload Toolbar
+fileInput("csv_file", "Choose CSV File:",
+          accept = c(".csv"),
+          buttonLabel = "Browse...",
+          placeholder = "No file selected")
+
+selectInput("csv_column", "Select Column:",
+            choices = NULL,
+            selected = NULL)
+
+conditionalPanel(
+  condition = "input.csv_column != null && input.csv_column != '' && input.csv_column != 'No numeric columns found'",
+  hr(),
+  radioButtons("plot_type", "Plot Type:",
+               c("Density Plot" = "density",
+                 "Distribution Characteristics" = "descdist",
+                 "Fit Theoretical Distribution" = "fitdist"),
+               selected = "density"),
+ 
+  hr(),
+ 
+  # Dynamic Options Section
+  tags$div(style = "font-size: 0.85rem;",
+    conditionalPanel(
+      condition = "input.plot_type == 'descdist'",
+      tags$h6("Options", style = "font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;"),
+      tags$div(style = "margin-bottom: 8px;",
+        numericInput("boot_samples", "Bootstrap Samples:",
+                     value = 100, min = 10, max = 1000, step = 10)
+      ),
+      helpText("More samples = smoother plot but slower computation.", style = "font-size: 0.75rem; margin-bottom: 5px;")
+    ),
+   
+    conditionalPanel(
+      condition = "input.plot_type == 'fitdist'",
+      tags$h6("Options", style = "font-weight: bold; margin-bottom: 5px; font-size: 0.9rem;"),
+      tags$div(style = "margin-bottom: 8px;",
+        selectInput("fit_distribution", "Select Distribution:",
+                    choices = c("norm" = "norm",
+                               "lnorm" = "lnorm",
+                               "gamma" = "gamma",
+                               "exp" = "exp",
+                               "cauchy" = "cauchy",
+                               "beta" = "beta"),
+                    selected = "norm")
+      ),
+      helpText("Distribution will be fitted using maximum likelihood.", style = "font-size: 0.75rem; margin-bottom: 5px;")
+    )
+  )
+)
+
+textOutput("data_info")
+```
+
+### Row {height="30%"}
+
+```{r}
+#| label: CSV Summary Stats
+uiOutput("csv_stats")
+```
+
+## Column {width="70%" .tabset}
+
+### Plot
+
+```{r}
+#| label: CSV Data Plot
+#| echo: false
+conditionalPanel(
+  condition = "input.plot_type == 'density' || !input.plot_type",
+  plotOutput("csv_plot", height = 400)
+)
+
+conditionalPanel(
+  condition = "input.plot_type == 'descdist'",
+  plotOutput("descdist_plot", height = 400)
+)
+
+conditionalPanel(
+  condition = "input.plot_type == 'fitdist'",
+  plotOutput("fitdist_plot", height = 400)
+)
+```
+
+### CSV Data
+
+```{r}
+#| label: CSV Data Table
+#| echo: false
+DT::dataTableOutput("csv_table", height = 400)
+```
+
+```{r}
+#| label: Server logic
+#| context: server
+
+# CSV Data Handling
+csv_data <- reactive({
+  req(input$csv_file)
+  tryCatch({
+    df <- read_csv(input$csv_file$datapath)
+    return(df)
+  }, error = function(e) {
+    return(NULL)
+  })
+})
+
+observe({
+  df <- csv_data()
+  if (!is.null(df)) {
+    numeric_cols <- names(df)[sapply(df, is.numeric)]
+    if (length(numeric_cols) > 0) {
+      updateSelectInput(session, "csv_column",
+                        choices = numeric_cols,
+                        selected = numeric_cols[1])
+    } else {
+      updateSelectInput(session, "csv_column",
+                        choices = "No numeric columns found",
+                        selected = NULL)
+    }
+  } else {
+    updateSelectInput(session, "csv_column",
+                      choices = NULL,
+                      selected = NULL)
+  }
+})
+
+output$data_info <- renderText({
+  df <- csv_data()
+  if (!is.null(df)) {
+    paste0("Rows: ", nrow(df), " | Cols: ", ncol(df))
+  } else if (!is.null(input$csv_file)) {
+    "Error loading file"
+  } else {
+    "No file uploaded"
+  }
+})
+
+best_fit_analysis <- reactive({
+  req(input$csv_file, input$csv_column, input$plot_type == 'fitdist')
+  df <- csv_data()
+  if (!is.null(df) && input$csv_column %in% names(df)) {
+    column_data <- df[[input$csv_column]]
+    column_data <- column_data[!is.na(column_data)]
+    if (length(column_data) > 10) {
+      distributions_to_test <- c("norm", "lnorm", "gamma", "exp")
+      if (all(is.finite(column_data))) {
+        distributions_to_test <- c(distributions_to_test, "cauchy")
+      }
+      if (all(column_data > 0 & column_data < 1)) {
+        distributions_to_test <- c(distributions_to_test, "beta")
+      }
+      results <- list()
+      aic_values <- c()
+      for (dist in distributions_to_test) {
+        tryCatch({
+          if (dist == "gamma" && any(column_data <= 0)) next
+          if (dist == "lnorm" && any(column_data <= 0)) next
+          if (dist == "exp" && any(column_data < 0)) next
+          fit <- fitdist(column_data, dist)
+          results[[dist]] <- fit
+          aic_values[dist] <- AIC(fit)
+        }, error = function(e) {})
+      }
+      if (length(aic_values) > 0) {
+        best_dist <- names(which.min(aic_values))
+        return(list(
+          results = results,
+          aic_values = aic_values,
+          best_distribution = best_dist,
+          best_aic = min(aic_values)
+        ))
+      }
+    }
+  }
+  return(NULL)
+})
+
+output$csv_plot <- renderPlot({
+  req(input$csv_file, input$csv_column)
+  df <- csv_data()
+  if (!is.null(df) && input$csv_column %in% names(df)) {
+    column_data <- df[[input$csv_column]]
+    column_data <- column_data[!is.na(column_data)]
+    if (length(column_data) > 0) {
+      plot_df <- data.frame(x = column_data)
+
+      tinytheme('classic', mar = c(2, 2, 1, 1), oma = c(0, 0, 0, 0))
+      tinyplot(plot_df$x, type = "density", lwd = 3,
+        bw='SJ',
+        adjust=.5,
+        kernel = "gaussian",
+        n = 512,
+        xlab = "Value",
+        ylab = "Density",
+        col = "#007e7e",
+        fill= "#007e7e")
+   
+      # Add histogram overlay
+      tinyplot_add(
+        plot_df$x,
+        type = "hist",
+        freq = FALSE,
+        col = 'black',
+        fill= 'transparent',
+        lwd=1
+      )
+
+      # Add reference lines
+      abline(v = 0, col = "black", lty = 1, lwd = 1.2)
+      abline(h = 0, col = "black", lty = 1, lwd = 1.2)
+      tinytheme()  # reset to default
+    } else {
+      ggplot() + 
+        annotate("text", x = 0.5, y = 0.5, label = "No valid data in selected column", size = 6) +
+        theme_void()
+    }
+  } else {
+    ggplot() + 
+      annotate("text", x = 0.5, y = 0.5, label = "Upload a CSV file and select a column", size = 6) +
+      theme_void()
+  }
+}, height = function() {
+  session$clientData$output_csv_plot_height
+}, width = function() {
+  session$clientData$output_csv_plot_width
+}, res = 96)
+
+output$descdist_plot <- renderPlot({
+  req(input$csv_file, input$csv_column, input$boot_samples)
+  df <- csv_data()
+  if (!is.null(df) && input$csv_column %in% names(df)) {
+    column_data <- df[[input$csv_column]]
+    column_data <- column_data[!is.na(column_data)]
+    if (length(column_data) > 5) {
+      tryCatch({
+        descdist(column_data, boot = input$boot_samples, obs.col= '#007e7e')
+        title(main = paste("Distribution Characteristics:", input$csv_column),
+              sub = paste("Based on", length(column_data), "observations with", 
+                         input$boot_samples, "bootstrap samples"))
+      }, error = function(e) {
+        plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+        text(1, 1, paste("Error creating descdist plot:\n", e$message), cex = 1.2, col = "red")
+        title("Distribution Characteristics - Error")
+      })
+    } else {
+      plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+      text(1, 1, "Need at least 6 observations\nfor distribution characteristics plot", cex = 1.5, col = "darkred")
+      title("Distribution Characteristics")
+    }
+  } else {
+    plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+    text(1, 1, "Upload a CSV file and select a column", cex = 1.5)
+    title("Distribution Characteristics")
+  }
+}, height = function() {
+  session$clientData$output_descdist_plot_height
+}, width = function() {
+  session$clientData$output_descdist_plot_width
+}, res = 96)
+
+output$fitdist_plot <- renderPlot({
+  req(input$csv_file, input$csv_column, input$fit_distribution)
+  df <- csv_data()
+  if (!is.null(df) && input$csv_column %in% names(df)) {
+    column_data <- df[[input$csv_column]]
+    column_data <- column_data[!is.na(column_data)]
+    if (length(column_data) > 5) {
+      tryCatch({
+        if (input$fit_distribution == "gamma" && any(column_data <= 0)) {
+          plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+          text(1, 1, "Gamma distribution requires positive values", cex = 1.2, col = "red")
+          title("Distribution Fit - Invalid Data")
+          return()
+        }
+        if (input$fit_distribution == "lnorm" && any(column_data <= 0)) {
+          plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+          text(1, 1, "Lognormal distribution requires positive values", cex = 1.2, col = "red")
+          title("Distribution Fit - Invalid Data")
+          return()
+        }
+        if (input$fit_distribution == "exp" && any(column_data < 0)) {
+          plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+          text(1, 1, "Exponential distribution requires non-negative values", cex = 1.2, col = "red")
+          title("Distribution Fit - Invalid Data")
+          return()
+        }
+        if (input$fit_distribution == "beta" && (!all(column_data > 0 & column_data < 1))) {
+          plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+          text(1, 1, "Beta distribution requires values between 0 and 1", cex = 1.2, col = "red")
+          title("Distribution Fit - Invalid Data")
+          return()
+        }
+        fit <- fitdist(column_data, input$fit_distribution)
+        plot(fit)
+        title(main = paste("Fitted", toupper(input$fit_distribution), "Distribution"),
+              sub = paste("AIC:", round(AIC(fit), 2)))
+      }, error = function(e) {
+        plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+        text(1, 1, paste("Error fitting distribution:\n", e$message), cex = 1.2, col = "red")
+        title("Distribution Fit - Error")
+      })
+    } else {
+      plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+      text(1, 1, "Need at least 6 observations\nfor distribution fitting", cex = 1.5, col = "darkred")
+      title("Distribution Fit")
+    }
+  } else {
+    plot(1, type = "n", axes = FALSE, xlab = "", ylab = "")
+    text(1, 1, "Upload a CSV file and select a column", cex = 1.5)
+    title("Distribution Fit")
+  }
+}, height = function() {
+  session$clientData$output_fitdist_plot_height
+}, width = function() {
+  session$clientData$output_fitdist_plot_width
+}, res = 96)
+
+output$csv_stats <- renderUI({
+  req(input$csv_file, input$csv_column)
+  df <- csv_data()
+  if (!is.null(df) && input$csv_column %in% names(df)) {
+    column_data <- df[[input$csv_column]]
+    column_data <- column_data[!is.na(column_data)]
+    if (length(column_data) > 0) {
+      if (input$plot_type == 'fitdist') {
+        best_fit <- best_fit_analysis()
+        if (!is.null(best_fit)) {
+          tagList(
+            tags$h4("Best Fitting Distribution", style = "margin-bottom: 10px;"),
+            tags$div(style = "font-size:1.15rem; font-weight:600; color: #2E8B57; margin-bottom: 5px;",
+                     paste("Best Fit:", toupper(best_fit$best_distribution))),
+            tags$div(style = "margin-bottom: 10px;",
+                     sprintf("AIC: %.2f", best_fit$best_aic)),
+            tags$div(style = "font-weight: 600; margin-bottom: 5px;", "Comparison (AIC):"),
+            tags$div(style = "font-size:0.9rem;",
+                     paste(names(best_fit$aic_values), 
+                           sprintf("%.1f", best_fit$aic_values),
+                           sep = ": ", collapse = " | "))
+          )
+        } else {
+          tagList(
+            tags$h4("Best Fitting Distribution"),
+            tags$p("Unable to fit distributions to this data")
+          )
+        }
+      } else {
+        tagList(
+          tags$h4(paste("Summary:", input$csv_column), style = "margin-bottom: 10px;"),
+          tags$div(style = "font-size:1.15rem; font-weight:600; margin-bottom: 5px;",
+                   sprintf("Mean: %.4f", mean(column_data))),
+          tags$div(style = "margin-bottom: 5px;",
+                   sprintf("Median: %.4f", median(column_data))),
+          tags$div(style = "margin-bottom: 5px;",
+                   sprintf("SD: %.4f", sd(column_data))),
+          tags$div(style = "font-size:0.9rem;",
+                   sprintf("Min: %.4f | Max: %.4f", min(column_data), max(column_data)))
+        )
+      }
+    } else {
+      tagList(
+        tags$h4("Summary"),
+        tags$p("No valid numeric data")
+      )
+    }
+  } else {
+    tagList(
+      tags$h4("Summary"),
+      tags$p("Select a column to view statistics")
+    )
+  }
+})
+
+
+output$csv_table <- DT::renderDataTable({
+  df <- csv_data()
+  if (!is.null(df)) {
+    max_rows <- 10000
+    if (nrow(df) > max_rows) {
+      df_display <- df[1:max_rows, ]
+      warning_msg <- paste("Showing first", max_rows, "rows of", nrow(df), "total rows")
+    } else {
+      df_display <- df
+      warning_msg <- NULL
+    }
+    
+    DT::datatable(df_display, 
+                  options = list(
+                    pageLength = 10,
+                    scrollX = TRUE,
+                    scrollY = "350px",
+                    dom = 'tip',
+                    processing = TRUE,
+                    deferRender = TRUE,
+                    scroller = TRUE
+                  ),
+                  class = 'cell-border stripe compact',
+                  caption = warning_msg)
+  } else {
+    NULL
+  }
+})
+```

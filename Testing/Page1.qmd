@@ -1,0 +1,146 @@
+---
+title: "DevDist page1"
+format:
+   dashboard:
+    theme:
+    - sandstone
+    - custom.scss
+    fontsize: .9em   # works like CSS
+server: shiny
+---
+
+```{r}
+#| label: Libraries
+#| context: setup
+library(shiny)
+library(bslib)
+library(tinyplot)
+```
+
+<!-- <a href="[](https://tommasoghilardi.github.io/DevStart/)"><img src='https://upload.wikimedia.org/wikipedia/commons/1/1b/R_logo.svg' width='70' align="right" /></a>  -->
+
+# Welcome to the Distribution Explorer! {orientation="columns"}
+
+:::: card
+<h1 style="color: #007e7e;">
+
+Welcome to DevDist
+
+</h1>
+
+DevDist is an interactive tool designed to help you explore statistical distributions that may be useful for modeling your cognitive developmental data (and beyond).
+
+This application highlights some of the most useful distributions commonly used in developmental research. Rather than serving as an exhaustive catalog or comprehensive statistical reference, DevDist aims to help you become familiar with key distributions, understand their parameters, and visualize how they behave under different conditions.
+
+Consider this your starting point for exploring distributions and their characteristics. When you're ready to dive deeper, excellent resources are available online, including: [Distribution explorer](https://distribution-explorer.github.io/index.html) and [Probability Distributions Viewer](https://statdist.ksmzn.com)
+
+<h3 style="color: #007e7e;">
+
+What can you do here?
+
+</h3>
+
+This tool is divided into three main sections:
+
+1.  **Welcome Page** You're currently on the landing page! While there isn't much interaction here, we'd like to draw your attention to the signal buttons in the bottom-left panel. These represent common physiological signals you might want to model. Simply click any button to jump directly to the Distribution Explorer with our recommended distribution for that signal type already selected.
+
+2.  **Distribution Explorer** This is the heart of the application, where you can dive deep into statistical distributions:
+
+    -   **Interactive Parameters**: Select any distribution from the dropdown menu and experiment with its parameters using intuitive sliders. Watch as the visualization updates in real-time to show how parameter changes affect the distribution's shape.
+    -   **Educational Content**: Each distribution comes with a clear description explaining its characteristics, common applications, and the types of signals it's best suited to model.
+    -   **Implementation Guide**: We provide examples using both **lme4** and **brms** frameworks. **lme4** offers excellent support for common distributions but has limitations - for less standard distributions, you'd typically need to rely on different specialized packages. In contrast, **brms** provides comprehensive support for a wide range of distributions within a single, consistent framework, making it our preferred choice for most distribution modeling tasks.
+
+3.  **Check Your Data** Transform your own data into actionable insights by uploading a CSV file. This section helps you:
+
+    -   **Visualize**: Generate clean, informative plots of your data distribution to understand its shape and characteristics.
+    -   **Discover**: Use the powerful `fitdistrplus` package to create Cullen-Frey plots, which provide expert recommendations about which distributions might best approximate your data.
+    -   **Compare**: Automatically fit multiple distributions to your data and compare their performance through visual diagnostics. The tool identifies the best-fitting distribution using AIC criteria, taking the guesswork out of model selection.
+
+::: callout-warning
+This is just my way to experiment with shiny and share some knowledghe in the process. In case you see something that can be improved or is not exact..just let me know!!
+![](https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExcDZlcnV6ZHA4YXA3Zmo0NnA1MmxlYng4dmU4NzRlazQybXNxZGZsNSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/Oe7H865K0YPfY6ILXm/giphy.gif){width="55"}
+:::
+::::
+
+## Column {width="30%"}
+
+### Row {height="70%"}
+
+```{r}
+#| label: Cute plot of distributions - Responsive
+plotOutput("welcome_distplot", 
+           height = "100%", 
+           width = "100%")
+```
+
+### Row {height="30%"}
+
+```{r}
+#| label: Signal badges
+#| echo: false
+ HTML('<p>
+      <span class="badge bg-primary me-2">IQ Scores</span>
+      <span class="badge bg-primary me-2">Memory Span</span>
+      <span class="badge bg-primary me-2">Standardized Test Scores</span>
+      <span class="badge bg-primary me-2">Cognitive Ability Measures</span>
+      <span class="badge bg-primary me-2">Personality Scale Scores</span>
+      <span class="badge bg-primary me-2">Attitude Ratings (averaged)</span>
+      <span class="badge bg-primary me-2">Measurement Error</span>
+    </p>')
+```
+
+```{r}
+#| label: Server logic
+#| context: server
+
+# Custom function to replace brms::rstudent_t
+rstudent_t_custom <- function(n, df, mu = 0, sigma = 1) {
+  mu + sigma * rt(n, df)
+}
+
+# ---- Welcome page distributions plot ----
+welcome_distributions_data <- reactive({
+  set.seed(123)
+  n_samples <- 100000  # keep smaller for speed with shiny
+  
+  df <- data.frame(
+    Normal       = rnorm(n_samples, mean = 0, sd = 1),
+    NormalLarge  = rnorm(n_samples, mean = 4, sd = 4),
+    Binomial     = (rbinom(n_samples, size = 1, prob = .5) * 10) - 5,
+    Lognormal    = rlnorm(n_samples, meanlog = 0.3, sdlog = 0.5),
+    LognormalInv = rlnorm(n_samples, meanlog = 0.3, sdlog = 0.55) * -1 + -1,
+    Student_t    = rstudent_t_custom(n_samples, df = 5, mu = .6, sigma = 1)
+  )
+  
+  # Reshape to long format
+  long_df <- stack(df)
+  names(long_df) <- c("Value", "Distribution")
+  
+  long_df
+})
+
+
+
+output$welcome_distplot <- renderPlot({
+  distributions_long <- welcome_distributions_data()
+  distributions_long$Distribution <- factor(distributions_long$Distribution)
+  
+  
+  tinytheme('void', mar = c(2, 2, 1, 1), oma = c(0, 0, 0, 0))
+  tinyplot(
+     ~ Value| Distribution, legend = FALSE,
+    data = distributions_long,
+    lwd = 4.5,
+    type = "density",
+    fill = 'by',
+    alpha = 0.7,
+    xlab = '',
+    ylab = ''
+  )
+}, height = function() {
+  session$clientData$output_welcome_distplot_height
+}, width = function() {
+  session$clientData$output_welcome_distplot_width
+})
+
+```

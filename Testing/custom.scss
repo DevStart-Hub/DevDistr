@@ -1,0 +1,22 @@
+/*-- scss:rules --*/
+// Reduce space after the numbered list text but before the bullet list
+ol > li {
+  > p {
+    margin-bottom: 0.3rem !important; // Space after text, before bullets
+  }
+}
+
+// Target the bullet list that's a direct child of numbered list item
+ol > li > ul {
+  margin-top: 0.2rem !important;    // Minimal space above bullet list
+  margin-bottom: 0.4rem !important; // Space below bullet list
+}
+
+// Reduce space between bullet items
+ol > li > ul > li {
+  margin-bottom: 0.2rem !important;
+  
+  &:last-child {
+    margin-bottom: 0 !important;
+  }
+}
